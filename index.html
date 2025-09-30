@@ -1,0 +1,520 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>一直線上の波の合成シミュレーション（壁の反射機能付き）</title>
+<link rel="icon" href="data:,">
+<style>
+  :root {
+    --bg: #0b1020;
+    --panel: #121a33;
+    --ink: #e8eefc;
+    --muted: #b8c2e0;
+    --accent: #70b7ff;
+    --accent-2: #b57bff;
+    --grid: #2a355d;
+    --axis: #9fb3ff;
+    --good: #74d39a;
+    --bad: #ff8a8a;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Hiragino Kaku Gothic ProN", Meiryo, sans-serif; background: var(--bg); color: var(--ink); }
+  header { padding: 12px 16px; border-bottom: 1px solid #1f294a; background: linear-gradient(180deg, #0f1730, #0b1020 60%); position: sticky; top: 0; z-index: 10; }
+  header h1 { margin: 0; font-size: 20px; letter-spacing: .02em; }
+  .layout { display: flex; flex-direction: column; gap: 12px; padding: 12px; }
+  .canvasPanel { background: var(--panel); border: 1px solid #1f294a; border-radius: 14px; padding: 8px; }
+  .controlsPanel { background: var(--panel); border: 1px solid #1f294a; border-radius: 14px; padding: 12px; }
+
+  .canvasBox { height: min(72vh, 80svh); }
+  canvas { width: 100%; height: 100%; display: block; border-radius: 12px; background: #0a0f22; border: 1px solid #1f294a; cursor: default; }
+
+  h2 { margin: 0 0 8px; font-size: 16px; color: var(--muted); font-weight: 600; }
+  .row { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; margin-bottom: 10px; }
+  label { display: grid; gap: 6px; font-size: 12px; color: var(--muted); }
+  input[type="number"], input[type="range"], select { width: 100%; background: #0b132a; color: var(--ink); border: 1px solid #24305a; border-radius: 10px; padding: 10px 12px; font-size: 14px; }
+  input[type="range"] { padding: 0; height: auto; }
+  input[type="checkbox"] { width: 18px; height: 18px; margin-right: 8px; accent-color: var(--accent); }
+  .checkbox-label { display: flex; align-items: center; background: #0b132a; border: 1px solid #24305a; border-radius: 10px; padding: 0 12px; height: 40px; cursor: pointer; }
+
+  button { appearance: none; border: 1px solid #2b3a73; background: #15224a; color: var(--ink); padding: 10px 14px; border-radius: 12px; cursor: pointer; font-weight: 600; }
+  button:hover { border-color: #3b4ea1; }
+  button.secondary { background: #0f1b3a; color: var(--muted); }
+  button.danger { border-color: #6d2a2a; background: #2a0f12; color: #ffdede; }
+  .btns { display: flex; gap: 8px; flex-wrap: wrap; }
+
+  .sourceList { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; }
+  .sourceCard { border: 1px solid #24305a; background: #0b132a; border-radius: 12px; padding: 12px; display: grid; gap: 10px; overflow: hidden; }
+  .sourceCard.selected { outline: 2px solid var(--accent); }
+  .sourceGrid { display: grid; grid-template-columns: repeat(2, minmax(120px, 1fr)); gap: 10px; }
+  .sourceHeader { display: flex; align-items: center; justify-content: space-between; font-weight: 700; color: var(--muted); }
+  .small { font-size: 12px; color: var(--muted); }
+  .kbd { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; background: #0c1430; border: 1px solid #253367; border-radius: 8px; padding: 1px 5px; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>一直線上の波の合成シミュレーション（壁の反射機能付き）</h1>
+    <div class="small">表示切替は <span class="kbd">V</span>：合成 / 個別、 再生 <span class="kbd">Space</span>、リセット <span class="kbd">R</span></div>
+  </header>
+
+  <div class="layout">
+    <section class="canvasPanel">
+      <div class="canvasBox">
+        <canvas id="cv" width="1600" height="900"></canvas>
+      </div>
+    </section>
+
+    <section class="controlsPanel" id="controls">
+      <h2>コントロール</h2>
+      <div class="btns" style="margin-bottom:10px;">
+        <button id="toggleView">合成表示</button>
+        <button id="start">スタート</button>
+        <button id="pause" class="secondary">一時停止</button>
+        <button id="reset" class="secondary">リセット</button>
+      </div>
+      <label>時間倍率 <span id="timeScaleLabel" style="font-weight: bold; color: var(--ink);">×1.00</span>
+        <input id="timeScale" type="range" min="0" max="4" step="0.01" value="2">
+      </label>
+
+      <h2 style="margin-top:16px">壁（反射）</h2>
+      <div class="row">
+        <label>壁の有無
+          <div class="checkbox-label">
+            <input id="wallEnabled" type="checkbox">
+            <span>有効にする</span>
+          </div>
+        </label>
+        <label>壁の位置 x (m)
+          <input id="wallX" type="number" step="0.1" min="0" max="20" value="18">
+        </label>
+        <label>反射の種類
+          <select id="wallType">
+            <option value="fixed">固定端</option>
+            <option value="free">自由端</option>
+          </select>
+        </label>
+      </div>
+
+      <h2 style="margin-top:16px">波源</h2>
+      <div class="btns" style="margin-bottom:10px;">
+        <button id="addSource">波源を追加</button>
+        <button id="removeSource" class="danger">選択波源を削除</button>
+      </div>
+      <div id="sourceList" class="sourceList"></div>
+
+      <h2 style="margin-top:16px">新規波源の初期パラメーター</h2>
+      <div class="row">
+        <label>速さ v (m/s)
+          <input id="v" type="number" step="0.1" min="-100" max="100" value="0.5">
+        </label>
+        <label>波長 λ (m)
+          <input id="lambda" type="number" step="0.05" min="0.05" max="100" value="4">
+        </label>
+        <label>振幅 A (m)
+          <input id="A" type="number" step="0.05" min="0" max="10" value="1">
+        </label>
+      </div>
+
+      <div class="small" style="margin-top:10px">※ キャンバス上の丸印（波源）や赤い点線（壁）をドラッグしても位置を変えられます。</div>
+
+      <h2 style="margin-top:16px">情報</h2>
+      <div class="small">各波源の周波数はそれぞれ f = v/λ, 角周波数 ω = 2π v / λ</div>
+      <div class="small">時刻 t = <span id="timeLabel">0.00</span> s</div>
+    </section>
+  </div>
+
+<script>
+(() => {
+  'use strict';
+  // ======== 状態 ========
+  const state = {
+    L: 20,
+    yMax: 2,
+    sources: [
+      { id: 1, x: 4,  v: 0.5, lambda: 4, A: 1, phase: 0 },
+    ],
+    nextId: 2,
+    view: 'combined',
+    running: false,
+    t: 0,
+    lastTime: 0,
+    wall: {
+      enabled: false,
+      x: 18,
+      type: 'fixed' // 'fixed' or 'free'
+    }
+  };
+
+  // ======== 要素 ========
+  const cv = document.getElementById('cv');
+  const ctx = cv.getContext('2d');
+  const DPR = window.devicePixelRatio || 1;
+  function resizeCanvasToDisplaySize() {
+    const cssW = cv.clientWidth;
+    const cssH = cv.clientHeight;
+    const needW = Math.round(cssW * DPR);
+    const needH = Math.round(cssH * DPR);
+    if (cv.width !== needW || cv.height !== needH) { cv.width = needW; cv.height = needH; }
+  }
+
+  const $ = (id) => document.getElementById(id);
+  const vInit = $('v');
+  const lambdaInit = $('lambda');
+  const AInit = $('A');
+  const timeScaleInput = $('timeScale');
+  const timeScaleLabel = $('timeScaleLabel');
+  const toggleBtn = $('toggleView');
+  const startBtn = $('start');
+  const pauseBtn = $('pause');
+  const resetBtn = $('reset');
+  const addBtn = $('addSource');
+  const removeBtn = $('removeSource');
+  const sourceList = document.getElementById('sourceList');
+  const timeLabel = $('timeLabel');
+  const wallEnabledCheck = $('wallEnabled');
+  const wallXInput = $('wallX');
+  const wallTypeSelect = $('wallType');
+
+  // ======== 座標変換 ========
+  function xToPx(x) {
+    const margin = 60 * DPR; const W = cv.width - margin * 2; return margin + (x / state.L) * W;
+  }
+  function pxToX(px) {
+    const margin = 60 * DPR; const W = cv.width - margin * 2; return Math.max(0, Math.min(state.L, (px - margin) * state.L / W));
+  }
+  function yToPx(y) {
+    const margin = 60 * DPR; const H = cv.height - margin * 2; return margin + H/2 - (y / state.yMax) * (H/2);
+  }
+  function clamp(x, lo, hi) { return Math.max(lo, Math.min(hi, x)); }
+
+  // ======== UI: 波源カード ========
+  function renderSourceCards() {
+    sourceList.innerHTML = '';
+    state.sources.forEach((s) => {
+      const card = document.createElement('div');
+      card.className = 'sourceCard';
+      if (selected && selected.id === s.id) card.classList.add('selected');
+      const header = document.createElement('div');
+      header.className = 'sourceHeader';
+      header.innerHTML = `<div>Source ${s.id}</div><div class="small">位相: ${Math.abs((s.phase % (2*Math.PI))) < 1e-9 ? '0' : 'π'}</div>`;
+      const grid = document.createElement('div');
+      grid.className = 'sourceGrid';
+      const makeField = (labelText, value, step, min, max, onChange) => {
+        const wrap = document.createElement('label');
+        wrap.innerHTML = `<span>${labelText}</span>`;
+        const inp = document.createElement('input');
+        inp.type = 'number'; inp.step = String(step); inp.min = String(min); inp.max = String(max); inp.value = String(value);
+        inp.addEventListener('change', () => { onChange(parseFloat(inp.value)); });
+        wrap.appendChild(inp);
+        return wrap;
+      };
+      const fx = makeField('x (m)', Number(s.x).toFixed(2), 0.1, 0, state.L, (val) => { s.x = clamp(val || 0, 0, state.L); needFrame = true; renderSourceCards(); });
+      const fv = makeField('v (m/s)', s.v, 0.1, -100, 100, (val) => { s.v = clamp(val || 0, -100, 100); needFrame = true; });
+      const fl = makeField('λ (m)', s.lambda, 0.05, 0.05, 100, (val) => { s.lambda = clamp(val || 0.05, 0.05, 100); needFrame = true; });
+      const fa = makeField('A (m)', s.A, 0.05, 0, 10, (val) => { s.A = clamp(val || 0, 0, 10); needFrame = true; });
+      grid.append(fx, fv, fl, fa);
+      const ops = document.createElement('div');
+      ops.className = 'btns';
+      const invertBtn = document.createElement('button');
+      invertBtn.textContent = '位相を反転 (π)';
+      invertBtn.addEventListener('click', () => {
+        s.phase = (Math.abs((s.phase % (2*Math.PI))) < 1e-9) ? Math.PI : 0;
+        needFrame = true; renderSourceCards();
+      });
+      ops.appendChild(invertBtn);
+      card.append(header, grid, ops);
+      card.addEventListener('click', () => { selected = s; renderSourceCards(); });
+      sourceList.appendChild(card);
+    });
+  }
+
+  addBtn.addEventListener('click', () => {
+    const x = state.L * (0.25 + 0.5 * Math.random());
+    const v0 = clamp(parseFloat(vInit.value) || 0.5, -100, 100);
+    const l0 = clamp(parseFloat(lambdaInit.value) || 4, 0.05, 100);
+    const a0 = clamp(parseFloat(AInit.value) || 1, 0, 10);
+    state.sources.push({ id: state.nextId++, x, v: v0, lambda: l0, A: a0, phase: 0 });
+    renderSourceCards();
+    sourceList.lastElementChild?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    needFrame = true;
+  });
+
+  removeBtn.addEventListener('click', () => {
+    if (!selected) return;
+    state.sources = state.sources.filter(s => s.id !== selected.id);
+    selected = state.sources.length > 0 ? state.sources[state.sources.length - 1] : null;
+    renderSourceCards();
+    needFrame = true;
+  });
+
+  // ======== UI: コントロール初期化 ========
+  function initializeControls() {
+    wallEnabledCheck.checked = state.wall.enabled;
+    wallXInput.value = String(state.wall.x);
+    wallXInput.max = String(state.L);
+    wallTypeSelect.value = state.wall.type;
+
+    wallEnabledCheck.addEventListener('change', () => { state.wall.enabled = wallEnabledCheck.checked; needFrame = true; });
+    wallXInput.addEventListener('input', () => { state.wall.x = clamp(parseFloat(wallXInput.value) || 0, 0, state.L); needFrame = true; });
+    wallTypeSelect.addEventListener('change', () => { state.wall.type = wallTypeSelect.value; needFrame = true; });
+
+    const updateTimeScaleLabel = () => {
+        const value = parseFloat(timeScaleInput.value);
+        const scale = Math.pow(2, value - 2);
+        timeScaleLabel.textContent = `×${scale.toFixed(2)}`;
+    };
+    timeScaleInput.addEventListener('input', updateTimeScaleLabel);
+    updateTimeScaleLabel();
+  }
+
+  // ======== 表示切替 / 再生制御 ========
+  toggleBtn.addEventListener('click', () => {
+    state.view = (state.view === 'combined') ? 'individual' : 'combined';
+    toggleBtn.textContent = (state.view === 'combined') ? '個別表示' : '合成表示';
+    needFrame = true;
+  });
+  startBtn.addEventListener('click', () => { state.running = true; });
+  pauseBtn.addEventListener('click', () => { state.running = false; });
+  resetBtn.addEventListener('click', () => { state.t = 0; state.running = false; needFrame = true; updateTimeLabel(); });
+
+  window.addEventListener('keydown', (e) => {
+    if (e.target.tagName === 'INPUT') return;
+    if (e.code === 'Space') { e.preventDefault(); state.running = !state.running; }
+    if (e.key === 'v' || e.key === 'V') { toggleBtn.click(); }
+    if (e.key === 'r' || e.key === 'R') { resetBtn.click(); }
+  });
+
+  // ======== ドラッグ ========
+  let selected = null;
+  let draggingSource = null;
+  let draggingWall = false;
+  const hitR = 12 * DPR;
+  const wallHitWidth = 10 * DPR;
+
+  cv.addEventListener('mousedown', (e) => {
+    const rect = cv.getBoundingClientRect();
+    const px = (e.clientX - rect.left) * DPR;
+    const py = (e.clientY - rect.top) * DPR;
+    if (state.wall.enabled && Math.abs(px - xToPx(state.wall.x)) <= wallHitWidth) {
+      draggingWall = true;
+      cv.style.cursor = 'ew-resize';
+      return;
+    }
+    for (let i = state.sources.length - 1; i >= 0; i--) {
+      const s = state.sources[i];
+      const sx = xToPx(s.x);
+      const sy = yToPx(s.A * Math.sin(omegaOf(s) * state.t + s.phase));
+      if ((sx - px) ** 2 + (sy - py) ** 2 <= hitR ** 2) {
+        draggingSource = s; selected = s;
+        renderSourceCards();
+        cv.style.cursor = 'grabbing';
+        return;
+      }
+    }
+  });
+
+  window.addEventListener('mousemove', (e) => {
+    const rect = cv.getBoundingClientRect();
+    const px = (e.clientX - rect.left) * DPR;
+    if (!draggingSource && !draggingWall) {
+      cv.style.cursor = state.wall.enabled && Math.abs(px - xToPx(state.wall.x)) <= wallHitWidth ? 'ew-resize' : 'default';
+      return;
+    }
+    const x = pxToX(px);
+    if (draggingSource) {
+      draggingSource.x = clamp(x, 0, state.L);
+      renderSourceCards();
+    } else if (draggingWall) {
+      state.wall.x = clamp(x, 0, state.L);
+      wallXInput.value = state.wall.x.toFixed(2);
+    }
+    needFrame = true;
+  });
+
+  window.addEventListener('mouseup', () => {
+    draggingSource = null;
+    draggingWall = false;
+    cv.style.cursor = 'default';
+  });
+
+  // ======== 物理計算 ========
+  function omegaOf(s) {
+    if (Math.abs(s.lambda) < 1e-6) return 0;
+    return 2 * Math.PI * (s.v / s.lambda);
+  }
+  function contributionFromSource(x, t, s) {
+    const speed = Math.abs(s.v);
+    if (speed < 1e-6 || Math.abs(s.lambda) < 1e-6 || s.A === 0) return 0;
+    const tau = Math.abs(x - s.x) / speed;
+    if (t < tau) return 0;
+    return s.A * Math.sin(omegaOf(s) * (t - tau) + s.phase);
+  }
+
+  // ======== 描画 ========
+  let needFrame = true;
+
+  // ★ フォント拡大版の drawAxes（DPR対応・自動スケール）
+  function drawAxes() {
+    const margin = 60 * DPR;
+    const W = cv.width - margin * 2, H = cv.height - margin * 2;
+
+    // 背景
+    ctx.fillStyle = '#0a0f22';
+    ctx.fillRect(0, 0, cv.width, cv.height);
+
+    // グリッド
+    ctx.strokeStyle = getCSS('--grid');
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let i = 0; i <= 10; i++) { const gx = margin + (W * i / 10); ctx.moveTo(gx, margin); ctx.lineTo(gx, margin + H); }
+    for (let j = 0; j <= 8; j++)  { const gy = margin + (H * j / 8);  ctx.moveTo(margin, gy); ctx.lineTo(margin + W, gy); }
+    ctx.stroke();
+
+    // 軸
+    ctx.strokeStyle = getCSS('--axis');
+    ctx.lineWidth = 2 * DPR;
+    const x0y = yToPx(0);
+    ctx.beginPath(); ctx.moveTo(margin, x0y); ctx.lineTo(margin + W, x0y); ctx.stroke();
+    const y0x = xToPx(0);
+    ctx.beginPath(); ctx.moveTo(y0x, margin); ctx.lineTo(y0x, margin + H); ctx.stroke();
+
+    // === フォントをキャンバス高さに応じて拡大 ===
+    // 例：高さ900pxなら ~32px（CSS px基準）、最小16、最大40
+    const fontPx = Math.max(16, Math.min(40, Math.round((cv.height / DPR) * 0.035)));
+    ctx.fillStyle = getCSS('--muted');
+    ctx.font = `${fontPx * DPR}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
+
+    // 目盛りラベルのオフセット（フォントに比例）
+    const xTickOffset = (fontPx * 1.1) * DPR; // x目盛りの下方向オフセット
+    const yTickLeft   = (fontPx * 0.6) * DPR; // y目盛りの左側マージン
+    const yTickVert   = (fontPx * 0.3) * DPR; // y目盛りの微調整
+
+    // x目盛り
+    ctx.textAlign = 'center';
+    for (let x = 0; x <= state.L; x += 2) {
+      ctx.fillText(`${x}`, xToPx(x), x0y + xTickOffset);
+    }
+
+    // y目盛り（y=0は省略）
+    ctx.textAlign = 'right';
+    for (let y = -state.yMax; y <= state.yMax; y += state.yMax / 2) {
+      if (Math.abs(y) < 1e-9) continue;
+      ctx.fillText(`${y.toFixed(1)}`, y0x - yTickLeft, yToPx(y) + yTickVert);
+    }
+
+    // 軸ラベルも拡大
+    ctx.fillStyle = getCSS('--ink');
+
+    // x (m)
+    ctx.textAlign = 'right';
+    ctx.fillText('x (m)', margin + W, x0y + (fontPx * 2.2) * DPR);
+
+    // y (m)
+    ctx.save();
+    ctx.translate(y0x - (fontPx * 1.8) * DPR, margin);
+    ctx.rotate(-Math.PI / 2);
+    ctx.textAlign = 'center';
+    ctx.fillText('y (m)', 0, 0);
+    ctx.restore();
+  }
+
+  function drawWall() {
+    if (!state.wall.enabled) return;
+    const px = xToPx(state.wall.x);
+    ctx.save();
+    ctx.strokeStyle = getCSS('--bad'); ctx.lineWidth = 3 * DPR; ctx.setLineDash([6 * DPR, 4 * DPR]);
+    ctx.beginPath(); ctx.moveTo(px, 0); ctx.lineTo(px, cv.height); ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawWaves() {
+    state.yMax = state.view === 'individual'
+      ? Math.max(1, Math.min(10, state.sources.reduce((max, s) => Math.max(max, s.A), 0) * 2.2))
+      : Math.max(1, Math.min(10, state.sources.reduce((sum, s) => sum + s.A, 0) * 2.2));
+
+    const nSamples = Math.max(600, Math.floor(cv.width / 2));
+    const colors = [ getCSS('--accent'), getCSS('--good'), getCSS('--accent-2'), '#ffd166', '#06d6a0', '#f78c6b' ];
+
+    if (state.view === 'individual') {
+      state.sources.forEach((s, idx) => {
+        const color = colors[idx % colors.length];
+        const p_incident = new Path2D(), p_reflected = new Path2D();
+        for (let i = 0; i <= nSamples; i++) {
+          const x = state.L * (i / nSamples);
+          const isSourceSide = (s.x <= state.wall.x && x <= state.wall.x) || (s.x >= state.wall.x && x >= state.wall.x);
+          const px = xToPx(x);
+          let y_incident = (!state.wall.enabled || isSourceSide) ? contributionFromSource(x, state.t, s) : 0;
+          let py_i = yToPx(y_incident);
+          if (i === 0) p_incident.moveTo(px, py_i); else p_incident.lineTo(px, py_i);
+          if (state.wall.enabled) {
+            let y_reflected = isSourceSide ? contributionFromSource(x, state.t, { ...s, x: 2 * state.wall.x - s.x, phase: s.phase + (state.wall.type === 'fixed' ? Math.PI : 0) }) : 0;
+            let py_r = yToPx(y_reflected);
+            if (i === 0) p_reflected.moveTo(px, py_r); else p_reflected.lineTo(px, py_r);
+          }
+        }
+        ctx.lineWidth = 2 * DPR; ctx.strokeStyle = color;
+        ctx.stroke(p_incident);
+        if (state.wall.enabled) {
+          ctx.save(); ctx.setLineDash([5 * DPR, 5 * DPR]); ctx.stroke(p_reflected); ctx.restore();
+        }
+      });
+    } else { // 'combined' view
+      const pC = new Path2D();
+      for (let i = 0; i <= nSamples; i++) {
+        const x = state.L * (i / nSamples);
+        let y = 0;
+        for (const s of state.sources) {
+          const isSourceSide = (s.x <= state.wall.x && x <= state.wall.x) || (s.x >= state.wall.x && x >= state.wall.x);
+          if (!state.wall.enabled || isSourceSide) y += contributionFromSource(x, state.t, s);
+          if (state.wall.enabled && isSourceSide) y += contributionFromSource(x, state.t, { ...s, x: 2 * state.wall.x - s.x, phase: s.phase + (state.wall.type === 'fixed' ? Math.PI : 0) });
+        }
+        const px = xToPx(x); const py = yToPx(y);
+        if (i === 0) pC.moveTo(px, py); else pC.lineTo(px, py);
+      }
+      ctx.lineWidth = 3 * DPR; ctx.strokeStyle = getCSS('--ink'); ctx.stroke(pC);
+    }
+
+    state.sources.forEach((s, idx) => {
+      const sx = xToPx(s.x);
+      const sy = yToPx(s.A * Math.sin(omegaOf(s) * state.t + s.phase));
+      ctx.strokeStyle = '#ffffff22'; ctx.lineWidth = 1 * DPR; ctx.beginPath(); ctx.moveTo(sx, yToPx(-state.yMax)); ctx.lineTo(sx, yToPx(state.yMax)); ctx.stroke();
+      ctx.beginPath(); ctx.fillStyle = colors[idx % colors.length]; ctx.arc(sx, sy, 6 * DPR, 0, Math.PI * 2); ctx.fill();
+      ctx.lineWidth = 2; ctx.strokeStyle = '#00000055'; ctx.stroke();
+    });
+  }
+
+  function frame(nowMs) {
+    resizeCanvasToDisplaySize();
+    if (state.running) {
+      if (!state.lastTime) state.lastTime = nowMs;
+      const dt = (nowMs - state.lastTime) / 1000;
+      state.lastTime = nowMs;
+      const speed = Math.pow(2, parseFloat(timeScaleInput.value) - 2);
+      state.t += dt * speed;
+      updateTimeLabel();
+      needFrame = true;
+    } else {
+      state.lastTime = 0;
+    }
+    if (needFrame) {
+      drawAxes();
+      drawWall();
+      drawWaves();
+      needFrame = false;
+    }
+    requestAnimationFrame(frame);
+  }
+
+  function updateTimeLabel() { timeLabel.textContent = state.t.toFixed(2); }
+  function getCSS(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || '#fff'; }
+
+  // 初期化
+  renderSourceCards();
+  initializeControls();
+  toggleBtn.textContent = (state.view === 'combined') ? '個別表示' : '合成表示';
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
