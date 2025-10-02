@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>波形シミュレーター</title>
+<title>一直線上の波の合成シミュレーション（壁の反射機能付き）</title>
 <link rel="icon" href="data:,">
 <style>
   :root {
@@ -54,7 +54,7 @@
 </head>
 <body>
   <header>
-    <h1>波形シミュレーター</h1>
+    <h1>一直線上の波の合成シミュレーション（壁の反射機能付き）</h1>
     <div class="small">表示切替は <span class="kbd">V</span>：合成 / 個別、 再生 <span class="kbd">Space</span>、リセット <span class="kbd">R</span></div>
   </header>
 
@@ -354,7 +354,7 @@
   // ======== 描画 ========
   let needFrame = true;
 
-  // ★ フォント拡大版の drawAxes（DPR対応・自動スケール）
+  // フォント拡大版の drawAxes（DPR対応・自動スケール）
   function drawAxes() {
     const margin = 60 * DPR;
     const W = cv.width - margin * 2, H = cv.height - margin * 2;
@@ -363,7 +363,7 @@
     ctx.fillStyle = '#0a0f22';
     ctx.fillRect(0, 0, cv.width, cv.height);
 
-    // グリッド
+    // グリッド（※線幅は従来のまま）
     ctx.strokeStyle = getCSS('--grid');
     ctx.lineWidth = 1;
     ctx.beginPath();
@@ -371,7 +371,7 @@
     for (let j = 0; j <= 8; j++)  { const gy = margin + (H * j / 8);  ctx.moveTo(margin, gy); ctx.lineTo(margin + W, gy); }
     ctx.stroke();
 
-    // 軸
+    // 軸（※見やすさ重視で従来幅）
     ctx.strokeStyle = getCSS('--axis');
     ctx.lineWidth = 2 * DPR;
     const x0y = yToPx(0);
@@ -379,16 +379,15 @@
     const y0x = xToPx(0);
     ctx.beginPath(); ctx.moveTo(y0x, margin); ctx.lineTo(y0x, margin + H); ctx.stroke();
 
-    // === フォントをキャンバス高さに応じて拡大 ===
-    // 例：高さ900pxなら ~32px（CSS px基準）、最小16、最大40
+    // フォントをキャンバス高さに応じて拡大
     const fontPx = Math.max(16, Math.min(40, Math.round((cv.height / DPR) * 0.035)));
     ctx.fillStyle = getCSS('--muted');
     ctx.font = `${fontPx * DPR}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
 
-    // 目盛りラベルのオフセット（フォントに比例）
-    const xTickOffset = (fontPx * 1.1) * DPR; // x目盛りの下方向オフセット
-    const yTickLeft   = (fontPx * 0.6) * DPR; // y目盛りの左側マージン
-    const yTickVert   = (fontPx * 0.3) * DPR; // y目盛りの微調整
+    // 目盛りラベルのオフセット
+    const xTickOffset = (fontPx * 1.1) * DPR;
+    const yTickLeft   = (fontPx * 0.6) * DPR;
+    const yTickVert   = (fontPx * 0.3) * DPR;
 
     // x目盛り
     ctx.textAlign = 'center';
@@ -403,14 +402,11 @@
       ctx.fillText(`${y.toFixed(1)}`, y0x - yTickLeft, yToPx(y) + yTickVert);
     }
 
-    // 軸ラベルも拡大
+    // 軸ラベル
     ctx.fillStyle = getCSS('--ink');
-
-    // x (m)
     ctx.textAlign = 'right';
     ctx.fillText('x (m)', margin + W, x0y + (fontPx * 2.2) * DPR);
 
-    // y (m)
     ctx.save();
     ctx.translate(y0x - (fontPx * 1.8) * DPR, margin);
     ctx.rotate(-Math.PI / 2);
@@ -423,7 +419,9 @@
     if (!state.wall.enabled) return;
     const px = xToPx(state.wall.x);
     ctx.save();
-    ctx.strokeStyle = getCSS('--bad'); ctx.lineWidth = 3 * DPR; ctx.setLineDash([6 * DPR, 4 * DPR]);
+    ctx.strokeStyle = getCSS('--bad');
+    ctx.lineWidth = 6 * DPR; // ★ 2倍に増量
+    ctx.setLineDash([6 * DPR, 4 * DPR]);
     ctx.beginPath(); ctx.moveTo(px, 0); ctx.lineTo(px, cv.height); ctx.stroke();
     ctx.restore();
   }
@@ -453,10 +451,16 @@
             if (i === 0) p_reflected.moveTo(px, py_r); else p_reflected.lineTo(px, py_r);
           }
         }
-        ctx.lineWidth = 2 * DPR; ctx.strokeStyle = color;
+        // ★ 波線を2倍（個別）
+        ctx.lineWidth = 4 * DPR;
+        ctx.strokeStyle = color;
         ctx.stroke(p_incident);
         if (state.wall.enabled) {
-          ctx.save(); ctx.setLineDash([5 * DPR, 5 * DPR]); ctx.stroke(p_reflected); ctx.restore();
+          ctx.save();
+          ctx.lineWidth = 4 * DPR; // ★ 反射波も2倍
+          ctx.setLineDash([5 * DPR, 5 * DPR]);
+          ctx.stroke(p_reflected);
+          ctx.restore();
         }
       });
     } else { // 'combined' view
@@ -472,13 +476,19 @@
         const px = xToPx(x); const py = yToPx(y);
         if (i === 0) pC.moveTo(px, py); else pC.lineTo(px, py);
       }
-      ctx.lineWidth = 3 * DPR; ctx.strokeStyle = getCSS('--ink'); ctx.stroke(pC);
+      // ★ 合成波も2倍
+      ctx.lineWidth = 6 * DPR;
+      ctx.strokeStyle = getCSS('--ink');
+      ctx.stroke(pC);
     }
 
+    // 発振点とガイド（必要に応じて太さ維持／微増）
     state.sources.forEach((s, idx) => {
       const sx = xToPx(s.x);
       const sy = yToPx(s.A * Math.sin(omegaOf(s) * state.t + s.phase));
-      ctx.strokeStyle = '#ffffff22'; ctx.lineWidth = 1 * DPR; ctx.beginPath(); ctx.moveTo(sx, yToPx(-state.yMax)); ctx.lineTo(sx, yToPx(state.yMax)); ctx.stroke();
+      ctx.strokeStyle = '#ffffff22';
+      ctx.lineWidth = 2 * DPR; // 少し見やすく
+      ctx.beginPath(); ctx.moveTo(sx, yToPx(-state.yMax)); ctx.lineTo(sx, yToPx(state.yMax)); ctx.stroke();
       ctx.beginPath(); ctx.fillStyle = colors[idx % colors.length]; ctx.arc(sx, sy, 6 * DPR, 0, Math.PI * 2); ctx.fill();
       ctx.lineWidth = 2; ctx.strokeStyle = '#00000055'; ctx.stroke();
     });
