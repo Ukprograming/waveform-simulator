@@ -351,6 +351,30 @@
     return s.A * Math.sin(omegaOf(s) * (t - tau) + s.phase);
   }
 
+  // ======== 合成の最大振幅を評価（壁の反射込み） ========
+  function computeMaxAmplitude() {
+    const nSamples = Math.max(600, Math.floor(cv.width / 2));
+    let maxAmp = 0;
+    for (let i = 0; i <= nSamples; i++) {
+      const x = state.L * (i / nSamples);
+      let y = 0;
+      for (const s of state.sources) {
+        const isSourceSide = (!state.wall.enabled) ||
+          ((s.x <= state.wall.x && x <= state.wall.x) || (s.x >= state.wall.x && x >= state.wall.x));
+        if (isSourceSide) {
+          y += contributionFromSource(x, state.t, s); // 入射
+          if (state.wall.enabled) {
+            const reflected = { ...s, x: 2 * state.wall.x - s.x, phase: s.phase + (state.wall.type === 'fixed' ? Math.PI : 0) };
+            y += contributionFromSource(x, state.t, reflected); // 反射
+          }
+        }
+      }
+      const ay = Math.abs(y);
+      if (ay > maxAmp) maxAmp = ay;
+    }
+    return maxAmp;
+  }
+
   // ======== 描画 ========
   let needFrame = true;
 
@@ -371,7 +395,7 @@
     for (let j = 0; j <= 8; j++)  { const gy = margin + (H * j / 8);  ctx.moveTo(margin, gy); ctx.lineTo(margin + W, gy); }
     ctx.stroke();
 
-    // 軸（※見やすさ重視で従来幅）
+    // 軸
     ctx.strokeStyle = getCSS('--axis');
     ctx.lineWidth = 2 * DPR;
     const x0y = yToPx(0);
@@ -389,17 +413,17 @@
     const yTickLeft   = (fontPx * 0.6) * DPR;
     const yTickVert   = (fontPx * 0.3) * DPR;
 
-    // x目盛り
+    // x目盛り（整数）
     ctx.textAlign = 'center';
     for (let x = 0; x <= state.L; x += 2) {
       ctx.fillText(`${x}`, xToPx(x), x0y + xTickOffset);
     }
 
-    // y目盛り（y=0は省略）→ 整数表示
+    // y目盛り（整数 1刻み、0は省略）
     ctx.textAlign = 'right';
-    for (let y = -state.yMax; y <= state.yMax; y += state.yMax / 2) {
-      if (Math.abs(y) < 1e-9) continue;
-      ctx.fillText(`${Math.round(y)}`, y0x - yTickLeft, yToPx(y) + yTickVert);
+    for (let y = -state.yMax; y <= state.yMax; y += 1) {
+      if (y === 0) continue;
+      ctx.fillText(`${y}`, y0x - yTickLeft, yToPx(y) + yTickVert);
     }
 
     // 軸ラベル
@@ -427,14 +451,10 @@
   }
 
   function drawWaves() {
-    // --- yMax を「偶数」へ切り上げ（2,4,6,8,10）に丸める ---
-    const raw = (state.view === 'individual')
-      ? Math.max(1, Math.min(10, state.sources.reduce((max, s) => Math.max(max, s.A), 0) * 2.2))
-      : Math.max(1, Math.min(10, state.sources.reduce((sum, s) => sum + s.A, 0) * 2.2));
-    let yMaxEven = Math.ceil(Math.max(2, raw));   // まず切り上げ（最低2）
-    if (yMaxEven % 2 !== 0) yMaxEven += 1;        // 偶数化
-    if (yMaxEven > 10) yMaxEven = 10;            // 上限10
-    state.yMax = yMaxEven;
+    // --- 合成波の最大振幅を評価し、yMax を 2,3,4,5,... に設定 ---
+    const maxAmp = computeMaxAmplitude();
+    const target = Math.max(2, Math.ceil(maxAmp - 1e-9)); // ぴったり整数の時は据え置き
+    state.yMax = target;
 
     const nSamples = Math.max(600, Math.floor(cv.width / 2));
     const colors = [ getCSS('--accent'), getCSS('--good'), getCSS('--accent-2'), '#ffd166', '#06d6a0', '#f78c6b' ];
@@ -445,43 +465,44 @@
         const p_incident = new Path2D(), p_reflected = new Path2D();
         for (let i = 0; i <= nSamples; i++) {
           const x = state.L * (i / nSamples);
-          const isSourceSide = (s.x <= state.wall.x && x <= state.wall.x) || (s.x >= state.wall.x && x >= state.wall.x);
+          const isSourceSide = (!state.wall.enabled) ||
+            ((s.x <= state.wall.x && x <= state.wall.x) || (s.x >= state.wall.x && x >= state.wall.x));
           const px = xToPx(x);
-          let y_incident = (!state.wall.enabled || isSourceSide) ? contributionFromSource(x, state.t, s) : 0;
+          let y_incident = isSourceSide ? contributionFromSource(x, state.t, s) : 0;
           let py_i = yToPx(y_incident);
           if (i === 0) p_incident.moveTo(px, py_i); else p_incident.lineTo(px, py_i);
-          if (state.wall.enabled) {
-            let y_reflected = isSourceSide ? contributionFromSource(x, state.t, { ...s, x: 2 * state.wall.x - s.x, phase: s.phase + (state.wall.type === 'fixed' ? Math.PI : 0) }) : 0;
+          if (state.wall.enabled && isSourceSide) {
+            let y_reflected = contributionFromSource(x, state.t, { ...s, x: 2 * state.wall.x - s.x, phase: s.phase + (state.wall.type === 'fixed' ? Math.PI : 0) });
             let py_r = yToPx(y_reflected);
             if (i === 0) p_reflected.moveTo(px, py_r); else p_reflected.lineTo(px, py_r);
           }
         }
-        // 波線（個別） 2倍
-        ctx.lineWidth = 4 * DPR;
+        ctx.lineWidth = 4 * DPR; // 個別：2倍
         ctx.strokeStyle = color;
         ctx.stroke(p_incident);
         if (state.wall.enabled) {
-          ctx.save();
-          ctx.lineWidth = 4 * DPR; // 反射波も2倍
-          ctx.setLineDash([5 * DPR, 5 * DPR]);
-          ctx.stroke(p_reflected);
-          ctx.restore();
+          ctx.save(); ctx.lineWidth = 4 * DPR; ctx.setLineDash([5 * DPR, 5 * DPR]); ctx.stroke(p_reflected); ctx.restore();
         }
       });
-    } else { // 'combined' view
+    } else { // 'combined'
       const pC = new Path2D();
       for (let i = 0; i <= nSamples; i++) {
         const x = state.L * (i / nSamples);
         let y = 0;
         for (const s of state.sources) {
-          const isSourceSide = (s.x <= state.wall.x && x <= state.wall.x) || (s.x >= state.wall.x && x >= state.wall.x);
-          if (!state.wall.enabled || isSourceSide) y += contributionFromSource(x, state.t, s);
-          if (state.wall.enabled && isSourceSide) y += contributionFromSource(x, state.t, { ...s, x: 2 * state.wall.x - s.x, phase: s.phase + (state.wall.type === 'fixed' ? Math.PI : 0) });
+          const isSourceSide = (!state.wall.enabled) ||
+            ((s.x <= state.wall.x && x <= state.wall.x) || (s.x >= state.wall.x && x >= state.wall.x));
+          if (isSourceSide) {
+            y += contributionFromSource(x, state.t, s);
+            if (state.wall.enabled) {
+              y += contributionFromSource(x, state.t, { ...s, x: 2 * state.wall.x - s.x, phase: s.phase + (state.wall.type === 'fixed' ? Math.PI : 0) });
+            }
+          }
         }
-        const px = xToPx(x); const py = yToPx(y);
+        const px = xToPx(x), py = yToPx(y);
         if (i === 0) pC.moveTo(px, py); else pC.lineTo(px, py);
       }
-      ctx.lineWidth = 6 * DPR; // 合成波も2倍
+      ctx.lineWidth = 6 * DPR; // 合成：2倍
       ctx.strokeStyle = getCSS('--ink');
       ctx.stroke(pC);
     }
@@ -491,7 +512,7 @@
       const sx = xToPx(s.x);
       const sy = yToPx(s.A * Math.sin(omegaOf(s) * state.t + s.phase));
       ctx.strokeStyle = '#ffffff22';
-      ctx.lineWidth = 2 * DPR; // 少し太め
+      ctx.lineWidth = 2 * DPR;
       ctx.beginPath(); ctx.moveTo(sx, yToPx(-state.yMax)); ctx.lineTo(sx, yToPx(state.yMax)); ctx.stroke();
       ctx.beginPath(); ctx.fillStyle = colors[idx % colors.length]; ctx.arc(sx, sy, 6 * DPR, 0, Math.PI * 2); ctx.fill();
       ctx.lineWidth = 2; ctx.strokeStyle = '#00000055'; ctx.stroke();
